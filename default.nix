@@ -31,7 +31,6 @@ in
 , cores     ? 4
 }:
 
-# build = host =?= target
 with nixpkgs.buildPackages;
 
 let
@@ -140,15 +139,15 @@ in
 
   shellHook           = let toYesNo = b: if b then "YES" else "NO"; in ''
     # somehow, CC gets overriden so we set it again here.
-    export CC=${stdenv.cc}/bin/${stdenv.targetPlatform.config}-cc
-    export CXX=${stdenv.cc}/bin/${stdenv.targetPlatform.config}-cxx
-    export LD=${stdenv.cc.bintools}/bin/${stdenv.targetPlatform.config}-ld${stdenv.lib.optionalString stdenv.targetPlatform.isAarch32 ".gold"}
-    export AS=${stdenv.cc.bintools.bintools}/bin/${stdenv.targetPlatform.config}-as
-    export AR=${stdenv.cc.bintools.bintools}/bin/${stdenv.targetPlatform.config}-ar
-    export NM=${stdenv.cc.bintools.bintools}/bin/${stdenv.targetPlatform.config}-nm
-    export RANLIB=${stdenv.cc.bintools.bintools}/bin/${stdenv.targetPlatform.config}-ranlib
-    export READELF=${stdenv.cc.bintools.bintools}/bin/${stdenv.targetPlatform.config}-readelf
-    export STRIP=./builder/comp-builder.nix/bin/${stdenv.targetPlatform.config}-strip
+    export CC=${stdenv.cc}/bin/${stdenv.cc.bintools.targetPrefix}cc
+    export CXX=${stdenv.cc}/bin/${stdenv.cc.bintools.targetPrefix}cxx
+    export LD=${stdenv.cc.bintools}/bin/${stdenv.cc.bintools.targetPrefix}ld${stdenv.lib.optionalString stdenv.targetPlatform.isAarch32 ".gold"}
+    export AS=${stdenv.cc.bintools.bintools}/bin/${stdenv.cc.bintools.targetPrefix}as
+    export AR=${stdenv.cc.bintools.bintools}/bin/${stdenv.cc.bintools.targetPrefix}ar
+    export NM=${stdenv.cc.bintools.bintools}/bin/${stdenv.cc.bintools.targetPrefix}nm
+    export RANLIB=${stdenv.cc.bintools.bintools}/bin/${stdenv.cc.bintools.targetPrefix}ranlib
+    export READELF=${stdenv.cc.bintools.bintools}/bin/${stdenv.cc.bintools.targetPrefix}readelf
+    export STRIP=./builder/comp-builder.nix/bin/${stdenv.cc.bintools.targetPrefix}strip
     export HAPPY=${hspkgs.happy}/bin/happy
     export ALEX=${hspkgs.alex}/bin/alex
     export PATH=${stdenv.cc.bintools.bintools}/bin:$PATH
