@@ -9,7 +9,9 @@ let
   fetchGhcIde  = import ./nix/fetch-tarball-with-override.nix "ghcide";
 in
 { nixpkgsPin ? ./nix/pins/nixpkgs.src-json
-, nixpkgs   ? import (fetchNixpkgs nixpkgsPin) {}
+, nixpkgsFun ? import (fetchNixpkgs nixpkgsPin)
+, crossSystem ? null
+, nixpkgs   ? nixpkgsFun { inherit crossSystem; }
 , bootghc   ? "ghc882"
 , version   ? "8.9"
 , hadrianCabal ? (builtins.getEnv "PWD") + "/hadrian/hadrian.cabal"
@@ -22,17 +24,18 @@ in
 # See https://github.com/alpmestan/ghc.nix/issues/64
 # , withIde   ? false
 , withHadrianDeps ? false
-, withDwarf  ? nixpkgs.stdenv.isLinux  # enable libdw unwinding support
-, withNuma   ? nixpkgs.stdenv.isLinux
-, withDtrace ? nixpkgs.stdenv.isLinux
+, withDwarf ? nixpkgs.stdenv.hostPlatform.isLinux  && !nixpkgs.stdenv.targetPlatform.isAarch32 # enable libdw unwinding support
+, withNuma  ? nixpkgs.stdenv.hostPlatform.isLinux && !nixpkgs.stdenv.targetPlatform.isAarch32
+, withDtrace ? nixpkgs.stdenv.hostPlatform.isLinux
 , withGrind ? true
 , cores     ? 4
 }:
 
-with nixpkgs;
+# build = host =?= target
+with nixpkgs.buildPackages;
 
 let
-    llvmForGhc = llvm_7;
+    llvmForGhc = llvm_9;
 
     stdenv =
       if useClang
@@ -57,7 +60,7 @@ let
     fonts = nixpkgs.makeFontsConf { fontDirectories = [ nixpkgs.dejavu_fonts ]; };
     docsPackages = if withDocs then [ python3Packages.sphinx ourtexlive ] else [];
 
-    depsSystem = with stdenv.lib; (
+    depsSystemForHost = with stdenv.lib; (
       [ autoconf automake m4 less
         gmp.dev gmp.out glibcLocales
         ncurses.dev ncurses.out
@@ -84,6 +87,15 @@ let
     );
     depsTools = with hspkgs; [ alex cabal-install happy ];
 
+    depsSystemForTarget = with stdenv.lib; with targetPackages;
+      [ gmp.dev gmp.out glibcLocales
+        #ncurses.dev ncurses.out
+        zlib.out
+        zlib.dev
+      ]
+      ++ optional withNuma targetPackages.numactl
+      ;
+
     hadrianCabalExists = builtins.pathExists hadrianCabal;
     hsdrv = if (withHadrianDeps &&
                 builtins.trace "checking if ${toString hadrianCabal} is present:  ${if hadrianCabalExists then "yes" else "no"}"
@@ -101,13 +113,13 @@ let
                 shake
                 unordered-containers
               ];
-              librarySystemDepends = depsSystem;
+              librarySystemDepends = depsSystemForHost;
             });
 in
 (hspkgs.shellFor rec {
   packages    = pkgset: [ hsdrv ];
-  nativeBuildInputs = depsTools;
-  buildInputs = depsSystem;
+  nativeBuildInputs = depsSystemForHost ++ depsTools;
+  buildInputs = depsSystemForTarget;
 
   hardeningDisable    = ["fortify"]                  ; ## Effectuated by cc-wrapper
   # Without this, we see a whole bunch of warnings about LANG, LC_ALL and locales in general.
@@ -116,6 +128,7 @@ in
   LOCALE_ARCHIVE      = if stdenv.isLinux then "${glibcLocales}/lib/locale/locale-archive" else "";
   CONFIGURE_ARGS      = [ "--with-gmp-includes=${gmp.dev}/include"
                           "--with-gmp-libraries=${gmp}/lib"
+                          "--target=${stdenv.targetPlatform.config}"
                         ] ++ lib.optionals withNuma [
                           "--with-libnuma-includes=${numactl}/include"
                           "--with-libnuma-libraries=${numactl}/lib"
@@ -127,16 +140,24 @@ in
 
   shellHook           = let toYesNo = b: if b then "YES" else "NO"; in ''
     # somehow, CC gets overriden so we set it again here.
-    export CC=${stdenv.cc}/bin/cc
+    export CC=${stdenv.cc}/bin/${stdenv.targetPlatform.config}-cc
+    export CXX=${stdenv.cc}/bin/${stdenv.targetPlatform.config}-cxx
+    export LD=${stdenv.cc.bintools}/bin/${stdenv.targetPlatform.config}-ld${stdenv.lib.optionalString stdenv.targetPlatform.isAarch32 ".gold"}
+    export AS=${stdenv.cc.bintools.bintools}/bin/${stdenv.targetPlatform.config}-as
+    export AR=${stdenv.cc.bintools.bintools}/bin/${stdenv.targetPlatform.config}-ar
+    export NM=${stdenv.cc.bintools.bintools}/bin/${stdenv.targetPlatform.config}-nm
+    export RANLIB=${stdenv.cc.bintools.bintools}/bin/${stdenv.targetPlatform.config}-ranlib
+    export READELF=${stdenv.cc.bintools.bintools}/bin/${stdenv.targetPlatform.config}-readelf
+    export STRIP=./builder/comp-builder.nix/bin/${stdenv.targetPlatform.config}-strip
     export HAPPY=${hspkgs.happy}/bin/happy
     export ALEX=${hspkgs.alex}/bin/alex
+    export PATH=${stdenv.cc.bintools.bintools}/bin:$PATH
     ${lib.optionalString withLlvm "export LLC=${llvmForGhc}/bin/llc"}
     ${lib.optionalString withLlvm "export OPT=${llvmForGhc}/bin/opt"}
 
     # "nix-shell --pure" resets LANG to POSIX, this breaks "make TAGS".
     export LANG="en_US.UTF-8"
-    export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:${lib.makeLibraryPath depsSystem}"
-    unset LD
+    export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:${lib.makeLibraryPath depsSystemForHost}"
 
     ${lib.optionalString withDocs "export FONTCONFIG_FILE=${fonts}"}
 
