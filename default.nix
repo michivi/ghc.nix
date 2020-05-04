@@ -42,6 +42,8 @@ let
       else nixpkgs.stdenv;
     noTest = pkg: haskell.lib.dontCheck pkg;
 
+    isCross = stdenv.hostPlatform != stdenv.targetPlatform;
+
     hspkgs = haskell.packages.${bootghc};
 
     ghcide-src = fetchGhcIde ./nix/pins/ghcide-nix.src-json ;
@@ -127,6 +129,7 @@ in
   LOCALE_ARCHIVE      = if stdenv.isLinux then "${glibcLocales}/lib/locale/locale-archive" else "";
   CONFIGURE_ARGS      = [ "--with-gmp-includes=${gmp.dev}/include"
                           "--with-gmp-libraries=${gmp}/lib"
+                        ] ++ lib.optionals isCross [
                           "--target=${stdenv.targetPlatform.config}"
                         ] ++ lib.optionals withNuma [
                           "--with-libnuma-includes=${numactl}/include"
